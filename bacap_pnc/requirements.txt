@@ -1,0 +1,8 @@
+numpy
+scipy>=1.9
+pandas
+matplotlib
+plotly>=5
+openpyxl
+requests
+lxml
