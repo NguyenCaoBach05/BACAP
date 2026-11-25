@@ -12,14 +12,10 @@ Rang buoc:
   (2),(3),(6) duoc ap ngay khi tao danh sach phuong an hop le
   (4) moi o (u', t') co toi da mot tau
   (5) tong so cau dang dung o moi gio t' <= Q
-
-Mo rong nho so voi tai lieu, de chay tren du lieu that:
-  - "Tau dang nam ben": tau da cap truoc t0 duoc co dinh vi tri va so cau
-    (chiem truoc mot so o va mot so cau).
-  - Gio bat dau duoc gioi han trong [a_i, a_i + MAX_DELAY] de mo hinh nho lai.
 """
 import math
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -33,12 +29,12 @@ class Params:
     delta_m: float = 100          # Delta, do dai mot unit
     Q: int = 22                   # tong so cau bo cua PNC
     rho: float = 25               # nang suat mot cau (luot/gio)
-    k_min: int = 2                # so cau toi thieu cho moi tau
-    k_max_cap: int = 6            # so cau toi da cho moi tau
-    m_per_crane: float = 60       # moi cau can khoang 60 m chieu dai tau
-    max_delay_h: int = 24         # cho toi da (gio) so voi gio den
-    step_h: int = 2               # do dai mot o thoi gian (gio); 1 = dung nhu tai lieu
-    time_limit_s: float = 120
+    k_min: int = 2                # K_i = {k_min, ..., k_max} cho moi tau
+    k_max: int = 5
+    step_h: int = 1               # do dai mot o thoi gian (gio); 1 = dung nhu tai lieu
+    max_delay_h: Optional[int] = None   # None = mo hinh goc, khong gioi han cho; so = D_max (gio)
+    horizon_h: Optional[int] = None     # H (gio), bat buoc khi max_delay_h = None
+    time_limit_s: float = 300
     mip_gap: float = 0.0
 
     @property
@@ -46,10 +42,9 @@ class Params:
         return int(self.quay_length_m // self.delta_m)
 
 
-def crane_range(loa_m, p: Params):
-    """K_i: so cau cho phep, tau cang dai cang duoc nhieu cau."""
-    k_max = max(p.k_min, min(p.k_max_cap, int(loa_m // p.m_per_crane)))
-    return list(range(p.k_min, k_max + 1))
+def crane_range(p: Params):
+    """K_i = {k_min, ..., k_max}, giong nhau cho moi tau."""
+    return list(range(p.k_min, p.k_max + 1))
 
 
 def build_and_solve(vessels: pd.DataFrame, fixed: pd.DataFrame, t0, p: Params, verbose=True):
@@ -66,13 +61,21 @@ def build_and_solve(vessels: pd.DataFrame, fixed: pd.DataFrame, t0, p: Params, v
     for _, r in vessels.iterrows():
         a = max(0, math.ceil(hrs(r["etb"])))
         s = math.ceil(r["loa_m"] / p.delta_m)
-        K = crane_range(r["loa_m"], p)
+        K = crane_range(p)
         h = {k: math.ceil(r["W"] / (k * p.rho * p.step_h)) for k in K}
         V.append(dict(row=r, a=a, s=s, K=K, h=h, w=1.0))
 
-    # khoang lap ke hoach H: du de moi tau lam xong
-    dmax = p.max_delay_h // p.step_h
-    H = max(v["a"] + dmax + max(v["h"].values()) for v in V)
+    # khoang lap ke hoach H
+    if p.max_delay_h is None:
+        # mo hinh goc: khong gioi han cho, H do nguoi dung dat
+        if p.horizon_h is None:
+            raise ValueError("max_delay_h = None thi phai dat horizon_h (H, gio).")
+        H = math.ceil(p.horizon_h / p.step_h)
+        dmax = None
+    else:
+        # co gioi han cho D_max: H = max_i (a_i + D_max + max_k h_ik)
+        dmax = p.max_delay_h // p.step_h
+        H = max(v["a"] + dmax + max(v["h"].values()) for v in V)
     for _, r in fixed.iterrows():
         H = max(H, math.ceil(hrs(r["etd"])))
 
@@ -92,7 +95,8 @@ def build_and_solve(vessels: pd.DataFrame, fixed: pd.DataFrame, t0, p: Params, v
     for i, v in enumerate(V):
         for k in v["K"]:                                       # (6) k thuoc K_i
             h = v["h"][k]
-            for t in range(v["a"], v["a"] + dmax + 1):  # (2) t >= a_i
+            t_hi = H if dmax is None else v["a"] + dmax
+            for t in range(v["a"], t_hi + 1):                    # (2) t >= a_i
                 if t + h > H:                                    # (3) t + h <= H
                     break
                 for u in range(0, M - v["s"] + 1):               # (6) u <= M - s_i
@@ -148,7 +152,9 @@ def build_and_solve(vessels: pd.DataFrame, fixed: pd.DataFrame, t0, p: Params, v
     if res.x is None:
         raise RuntimeError(f"Khong tim duoc loi giai: {res.message}")
     if verbose:
-        print(f"  Trang thai: {res.message} | Z = {res.fun:.0f} gio")
+        gap = getattr(res, "mip_gap", None)
+        gap_txt = f"{gap * 100:.2f}%" if gap is not None and np.isfinite(gap) else "n/a"
+        print(f"  Trang thai: {res.message} | Z = {res.fun:.0f} gio | MIP gap = {gap_txt}")
 
     # ---- Doc loi giai -------------------------------------------------------
     out = []

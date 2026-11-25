@@ -34,7 +34,7 @@ from interactive_chart import show_schedule
 from save_results import save_results
 
 # ============================ CAU HINH — sua o day ============================
-N_VESSELS = 14              # so tau boc ngau nhien
+N_VESSELS = 15              # so tau boc ngau nhien
 SEED      = 42              # cung seed = boc ra dung nhung tau do (chay lai ra ket qua cu)
 DATE_FROM = "2026-11-25"    # chi boc tau co gio cap (ETB) tu ngay nay ...
 DATE_TO   = "2026-11-27"    # ... den truoc ngay nay
@@ -45,9 +45,10 @@ SAVE_RESULTS = False        # True = luu Excel + anh + html vao output/; False =
 Q          = 22             # tong so cau bo
 RHO        = 25             # nang suat mot cau (luot/gio)
 DELTA_M    = 100            # do dai mot unit cau cang (m)
-STEP_H     = 2              # do dai mot o thoi gian (gio)
-MAX_DELAY  = 24             # tau duoc cho toi da bao nhieu gio
-TIME_LIMIT = 120            # gioi han thoi gian giai (giay)
+STEP_H     = 1              # do dai mot o thoi gian (gio)
+MAX_DELAY  = 24             # tau duoc cho toi da bao nhieu gio; None = khong gioi han (mo hinh goc)
+HORIZON_H  = None           # H (gio); chi can khi MAX_DELAY = None, vi du 168
+TIME_LIMIT = 300            # gioi han thoi gian giai (giay)
 # ==============================================================================
 
 
@@ -78,7 +79,7 @@ def main():
 
     # ---- Giai mo hinh ------------------------------------------------------------
     p = Params(Q=Q, rho=RHO, delta_m=DELTA_M, step_h=STEP_H,
-               max_delay_h=MAX_DELAY, time_limit_s=TIME_LIMIT)
+               max_delay_h=MAX_DELAY, horizon_h=HORIZON_H, time_limit_s=TIME_LIMIT)
     t0 = picked.etb.min().floor("D")          # bat dau ke hoach tu 0h ngay tau dau tien den
     no_fixed = picked.iloc[0:0].assign(k_fixed=[])   # khong co tau dang nam ben
     print(f"\nGiai mo hinh (t0 = {t0}) ...")
@@ -104,7 +105,7 @@ def main():
     if SAVE_RESULTS:
         params = dict(N_VESSELS=args.n, SEED=args.seed, DATE_FROM=args.date_from, DATE_TO=args.date_to,
                       TERMINALS=",".join(TERMINALS), Q=p.Q, rho=p.rho, delta_m=p.delta_m, step_h=p.step_h,
-                      max_delay_h=p.max_delay_h, quay_length_m=p.quay_length_m,
+                      max_delay_h=p.max_delay_h, horizon_h=p.horizon_h, quay_length_m=p.quay_length_m,
                       Z_hours=float(sched.stay_h.sum()), solve_status=res.message)
         save_results(tag, sched, params, extra_sheets={"selected": picked}, fig=fig,
                      png=dict(sched=sched.assign(fixed=False), t_from=t0, t_to=t_end, title=title,
